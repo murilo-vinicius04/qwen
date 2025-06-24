@@ -1,38 +1,70 @@
 # 1. IMAGEM BASE
-# Começamos com uma imagem oficial do Python, versão 3.11. É limpa e confiável.
-FROM python:3.11-slim
+# Começamos com ROS2 Humble que já tem Python 3.10
+FROM ros:humble-ros-core-jammy
 
 # 2. VARIÁVEIS DE AMBIENTE
 # Evita que o instalador de pacotes fique fazendo perguntas.
 ENV DEBIAN_FRONTEND=noninteractive
-# Força a compilação do llama-cpp-python com OpenMP.
-ENV CMAKE_ARGS="-DLLAMA_OPENMP=ON"
-# Desativa o cache do pip dentro da imagem pra garantir que tudo seja fresco.
-ENV PIP_NO_CACHE_DIR=off
+# Configura o ROS2
+ENV ROS_DISTRO=humble
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 # 3. INSTALANDO DEPENDÊNCIAS DO SISTEMA
-# Aqui a gente instala o compilador, a FAMOSA libgomp1, e o git.
-# É a primeira coisa que a gente faz no ambiente limpo.
+# Instala dependências para Python, ROS2, audio, e Piper
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
-    libgomp1 \
     git \
+    python3-pip \
+    python3-dev \
+    python3-venv \
+    ros-humble-rclpy \
+    ros-humble-std-msgs \
+    alsa-utils \
+    portaudio19-dev \
+    python3-pyaudio \
+    libportaudio2 \
+    libportaudiocpp0 \
+    ffmpeg \
+    espeak-ng \
+    espeak-ng-data \
+    pulseaudio \
+    pulseaudio-utils \
+    wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 4. PREPARANDO O APP
-# Cria uma pasta para o nosso código dentro da "caixa".
+# 4. PREPARANDO O WORKSPACE ROS2
 WORKDIR /app
 
+# Instala python3-colcon-common-extensions para ROS2
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-colcon-common-extensions \
+    && rm -rf /var/lib/apt/lists/*
+
 # 5. INSTALANDO DEPENDÊNCIAS DO PYTHON
-# Copia SÓ a lista de requisitos primeiro. O Docker é esperto, se esse arquivo não mudar,
-# ele não vai re-instalar tudo toda vez, acelerando o processo.
 COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Agora sim, instalamos os pacotes Python.
-# O llama-cpp-python vai compilar aqui, no nosso ambiente perfeito.
-RUN pip install --no-cache-dir -r requirements.txt
+# 6. BAIXA PIPER TTS
+RUN mkdir -p /app/piper && \
+    wget -O /app/piper/piper_amd64.tar.gz https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
+    tar -xzf /app/piper/piper_amd64.tar.gz -C /app/piper --strip-components=1 && \
+    rm /app/piper/piper_amd64.tar.gz
 
-# 6. COPIANDO O CÓDIGO DO APP
-# Com tudo já instalado, copiamos o resto do nosso código (o test.py).
-COPY . .
+# Baixa modelo de voz em português brasileiro
+RUN mkdir -p /app/piper/models && \
+    wget -O /app/piper/models/pt_BR-cadu-medium.onnx https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/cadu/medium/pt_BR-cadu-medium.onnx && \
+    wget -O /app/piper/models/pt_BR-cadu-medium.onnx.json https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/cadu/medium/pt_BR-cadu-medium.onnx.json
+
+# 7. CRIA WORKSPACE ROS2 E COPIA CÓDIGO
+# Copia a estrutura completa do workspace
+COPY src/ /app/ros2_ws/src/
+
+# 8. COMPILA O WORKSPACE ROS2
+WORKDIR /app/ros2_ws
+RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build --symlink-install"
+
+# 9. COMANDO PADRÃO - Executa launch file
+CMD ["/bin/bash", "-c", "source /opt/ros/humble/setup.bash && source install/setup.bash && ros2 launch lisa_chatbot lisa.launch.py"]

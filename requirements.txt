@@ -1,4 +1,8 @@
 langchain
-langchain-community
+langchain-community  
 langchain-openai
-llama-cpp-python
+faster-whisper
+webrtcvad
+pyaudio
+numpy
+scipy
